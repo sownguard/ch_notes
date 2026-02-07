@@ -317,3 +317,56 @@ WHERE table = 'mart_carsharing_trip_parted'
 and active;
 
 SELECT * FROM system.merges;
+
+
+
+
+---- partitions 
+
+DROP TABLE IF EXISTS learn_db.orders;
+CREATE TABLE learn_db.orders (
+	order_id UInt32,
+	user_id UInt32,
+	product_id UInt32,
+	amount Decimal(18,2),
+	order_date Date
+)
+ENGINE = MergeTree()
+ORDER BY (product_id);
+
+INSERT INTO learn_db.orders 
+SELECT 
+	number AS order_id
+	,round(randUniform(1, 100000)) AS user_id
+	,round(randUniform(1, 1000000)) AS product_id
+	,randUniform(1, 10000) AS amount
+	,date_add(DAY, rand() % (365 * 10 + 2), today() - INTERVAL 10 YEAR)
+FROM
+	numbers(10000000);
+
+SELECT DISTINCT _partition_id, _part 
+FROM learn_db.orders 
+ORDER BY _partition_id, _part;
+
+DROP TABLE IF EXISTS learn_db.orders_parted_by_year;
+CREATE TABLE learn_db.orders_parted_by_year (
+	order_id UInt32,
+	user_id UInt32,
+	product_id UInt32,
+	amount Decimal(18,2),
+	order_date Date
+)
+ENGINE = MergeTree()
+PARTITION BY toYear(order_date)
+ORDER BY (product_id);
+
+INSERT INTO learn_db.orders_parted_by_year
+SELECT * FROM learn_db.orders;
+
+SELECT DISTINCT _partition_id, _part 
+FROM learn_db.orders_parted_by_year 
+ORDER BY _partition_id, _part;
+
+SELECT * FROM system.parts
+WHERE table = 'orders_parted_by_year'
+and active;
