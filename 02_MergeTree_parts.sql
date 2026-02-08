@@ -193,6 +193,10 @@ SETTINGS async_insert=1
 VALUES (1, now(), 'trip');" > async_query.sql
 clickhouse-benchmark -i 1000000 -c 10 --query "`cat async_query.sql`"
 
+SELECT * FROM system.asynchronous_inserts;
+SELECT * FROM system.asynchronous_insert_log;
+SELECT * FROM system.parts where table = 'async_test' and level = 0;
+
 
 SELECT * 
 FROM system.parts 
