@@ -523,6 +523,7 @@ HAVING
 
 
 -- 4.1 Summing Merge Tree
+-- https://docs.google.com/spreadsheets/d/10lGPFcP3mJPo5jqMdqsbG1QE3x8P5Y_3JF062V9SyTQ/edit?gid=0#gid=0
 
 # Применение движка SummingMergeTree
 
@@ -757,3 +758,151 @@ VALUES
 
 OPTIMIZE TABLE learn_db.orders_summ FINAL; 
 SELECT *, _part FROM orders_summ;
+
+
+
+
+
+
+
+--- 5.1 AggregatingMergeTree
+
+
+
+
+
+DROP TABLE IF EXISTS learn_db.orders;
+CREATE TABLE learn_db.orders (
+    order_id UInt32,
+    user_id UInt32,
+    product_id UInt32,
+    amount Decimal(18, 2),
+    order_date Date
+) ENGINE = MergeTree()
+ORDER BY (product_id, order_date);
+
+
+insert into learn_db.orders
+(order_id, user_id, product_id, amount, order_date)
+values
+(1, 1, 1, 10, '2025-01-01'),
+(2, 2, 1, 10, '2025-01-01'),
+(3, 1, 2, 5, '2025-01-01'),
+(4, 2, 2, 5, '2025-01-01');
+
+select  count(distinct user_id)
+from learn_db.orders;
+
+
+DROP TABLE IF EXISTS learn_db.orders_agg;
+CREATE TABLE learn_db.orders_agg (
+    product_id UInt32,
+    order_date Date,
+    amount AggregateFunction(sum, Decimal(18, 2)),
+    users AggregateFunction(uniq, UInt32)   
+) 
+ENGINE = AggregatingMergeTree()
+ORDER BY (product_id, order_date);
+
+
+-- state - "формирование" хэш таблицы
+insert into learn_db.orders_agg
+select 
+	product_id,
+	order_date,
+	sumState(amount) as amount,
+	uniqState(user_id) as users
+from learn_db.orders
+group by (product_id, order_date);
+
+
+-- in warp
+select *, _part from learn_db.orders_agg;
+
+--   ┌─product_id─┬─order_date─┬─amount─┬─users─┬─_part─────┐
+--1. │          1 │ 2025-01-01 │ �       │ ,�4�e   │ all_1_1_1 │
+--2. │          2 │ 2025-01-01 │ �       │ ,�4�e   │ all_1_1_1 │
+
+-- merge - принимает хэш таблицу, выполняет расчет
+select 
+	product_id,
+	order_date,
+	sumMerge(amount),
+	uniqMerge(users)
+from learn_db.orders_agg
+group by (product_id, order_date);
+
+
+
+insert into learn_db.orders
+(order_id, user_id, product_id, amount, order_date)
+values
+(5, 3, 1, 10, '2025-01-01');
+
+insert into learn_db.orders_agg
+select 
+	product_id,
+	order_date,
+	sumState(amount) as amount,
+	uniqState(user_id) as users
+from learn_db.orders
+where order_id=5
+group by (product_id, order_date);
+
+
+
+
+-- check speed
+
+truncate table learn_db.orders;
+truncate table learn_db.orders_agg;
+
+select count() from learn_db.orders;
+select count() from learn_db.orders_agg;
+
+INSERT INTO learn_db.orders
+SELECT
+    number + 10 AS order_id,
+    round(randUniform(1, 1000)) AS user_id,
+    round(randUniform(1, 1000)) AS product_id,
+    randUniform(1, 5000) AS amount,
+    date_add(DAY, rand() % 366, today() - INTERVAL 1 YEAR) AS order_date
+FROM 
+    numbers(10000000);
+
+
+insert into learn_db.orders_agg
+select
+	product_id,
+	order_date,
+	sumState(amount) as amount,
+	uniqState(user_id) as users
+from learn_db.orders
+group by (product_id, order_date);
+
+
+select count() from learn_db.orders;
+select count() from learn_db.orders_agg;
+
+
+select 	
+	product_id,
+	sum(amount),
+	uniq(user_id)
+from learn_db.orders
+group by product_id;
+
+-- прирост небольшой, порядка х2-х3
+-- движок следует использовать в случаях,
+-- когда кол-во строк с аггрегацией 
+-- снижается относительно основной таблицы 
+-- хотя бы на 2 порядка
+select 	
+	product_id,
+	sumMerge(amount),
+	uniqMerge(users)
+from learn_db.orders_agg
+group by product_id; 
+
+
+
