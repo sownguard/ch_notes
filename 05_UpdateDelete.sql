@@ -20,7 +20,7 @@ SELECT
 FROM numbers(20);
 
 
-
+select * from learn_db.lwdemo
 
 SELECT
     database,
@@ -490,3 +490,153 @@ select * from learn_db.update_demo;
 
 select * from system.parts
 where table = 'update_demo';
+
+
+
+--- show best practice column exchange
+
+-- create table
+DROP TABLE IF EXISTS learn_db.update_demo;
+
+CREATE TABLE learn_db.update_demo
+(
+    id UInt64,
+    user_id UInt64,
+    value String
+)
+ENGINE = MergeTree
+ORDER BY id
+SETTINGS min_bytes_for_wide_part = 0;
+
+-- add some data
+INSERT INTO learn_db.update_demo
+SELECT
+    number,
+    number % 3,
+    'sometext'
+FROM numbers(10);
+
+--check
+select * from learn_db.update_demo;
+
+-- add new column
+ALTER TABLE learn_db.update_demo 
+	ADD COLUMN value_new String DEFAULT 'some_updated';
+
+-- show
+select * from learn_db.update_demo;
+
+-- exchange columns
+ALTER TABLE learn_db.update_demo
+    RENAME COLUMN value TO value_old,
+    RENAME COLUMN value_new TO value,
+    DROP COLUMN value_old;
+
+-- show
+select * from learn_db.update_demo;
+
+
+
+
+
+--- delete / update witm *MR engines
+
+-- create table
+drop table article_reads;
+
+CREATE TABLE article_reads
+(
+    `user_id` UInt32,
+    `article_id` UInt32,
+    `read_to` UInt8,
+    `read_start` DateTime,
+    `read_end` DateTime,
+    `sign` Int8
+)
+ENGINE = CollapsingMergeTree(sign)
+ORDER BY (read_start, article_id, user_id);
+
+
+-- user started to read article
+INSERT INTO article_reads
+            VALUES(1, 12, 0, now(), now(), 1);
+
+
+select * from article_reads; 
+
+
+-- user read 70% article
+INSERT INTO article_reads
+values
+-- erase old value
+-- add new
+(1, 12, 0, '2023-01-06 15:20:32', now(), -1), 
+(1, 12, 70, '2023-01-06 15:20:32', now(), 1); 
+
+-- shows all
+select * from article_reads;
+
+
+-- why max?
+SELECT
+    article_id,
+    user_id,
+    max(read_end),
+    max(read_to)
+FROM article_reads
+WHERE sign = 1
+GROUP BY
+    user_id,
+    article_id;
+
+
+
+-- why max?
+SELECT
+    article_id,
+    user_id,
+    read_end,
+    read_to
+FROM article_reads
+WHERE sign = 1
+GROUP BY
+    user_id,
+    article_id;
+
+--- group dont work if 
+--- non group column has no agg func
+
+
+---
+--- upserts
+
+drop table article_reads;
+CREATE TABLE article_reads
+(
+    `user_id` UInt32,
+    `article_id` UInt32,
+    `read_to` UInt8,
+    `read_time` DateTime,
+    `version` Int32
+)
+ENGINE = ReplacingMergeTree(version)
+ORDER BY (article_id, user_id);
+
+INSERT INTO article_reads
+values
+(1, 12, 0, '2023-01-06 15:20:32', 1),
+(1, 12, 30, '2023-01-06 15:21:42', 2),
+(1, 12, 45, '2023-01-06 15:22:13', 3),
+(1, 12, 80, '2023-01-06 15:23:10', 4);
+
+
+
+SELECT *
+FROM article_reads
+WHERE 
+	user_id = 1 
+	AND 
+	article_id = 12
+ORDER BY version desc;
+
+
