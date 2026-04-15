@@ -638,5 +638,3 @@ WHERE
 	AND 
 	article_id = 12
 ORDER BY version desc;
-
-
